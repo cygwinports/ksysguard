@@ -1,0 +1,190 @@
+--- origsrc/ksysguard-5.8.3/example/ksysguarddrc	2016-11-01 07:12:49.000000000 -0500
++++ src/ksysguard-5.8.3/example/ksysguarddrc	2016-11-29 00:47:57.026147800 -0600
+@@ -1,7 +1,7 @@
+ # /etc/ksysguardd.conf
+ 
+ # LogFiles: the list of all available logfiles
+-LogFiles=messages:/var/log/messages,kern:/var/log/kern.log,daemon:/var/log/daemon.log,syslog:/var/log/syslog,auth:/var/log/auth.log
++LogFiles=messages:/var/log/messages,x0:/var/log/xwin/XWin.0.log,nginx/access:/var/log/nginx/access.log,nginx/error:/var/log/nginx/error.log,httpd/access:/var/log/httpd/access_log,httpd/error:/var/log/httpd/error_log
+ 
+ # Sensors: the list of all accessible sensors
+ #	Apm             Advanced Power Management
+@@ -19,4 +19,4 @@ LogFiles=messages:/var/log/messages,kern
+ #	SoftRaid	Monitors software raid devices. See mdadm.
+ #	Stat            interrupts, CPU and disk throughput. Data comes from /etc/stat
+ #	Uptime          System uptime. Data comes from /etc/uptime
+-Sensors=ProcessList,Memory,Stat,NetDev,NetStat,Apm,Acpi,CpuInfo,LoadAvg,LmSensors,DiskStat,LogFile,DiskStats,Uptime,SoftRaid
++Sensors=ProcessList,Memory,Stat,CpuInfo,LoadAvg,DiskStat,LogFile,Uptime
+--- origsrc/ksysguard-5.8.3/ksysguardd/CMakeLists.txt	2016-11-01 07:12:49.000000000 -0500
++++ src/ksysguard-5.8.3/ksysguardd/CMakeLists.txt	2016-11-28 17:14:37.794173200 -0600
+@@ -1,5 +1,7 @@
+ include_directories( ${CMAKE_CURRENT_SOURCE_DIR}/CContLib/ )
+ 
++add_definitions(-D_DEFAULT_SOURCE)
++
+ # Laurent: Verify that we install it into (kdeprefix)/etc/ and not into /etc
+ # otherwise it's necessary to change it.
+ # into kde 3.x it was installed into /etc/
+@@ -27,9 +29,14 @@ else()
+         add_subdirectory( "Solaris" )
+         include_directories( ${CMAKE_CURRENT_SOURCE_DIR}/Solaris )
+     else()
++    if( CYGWIN )
++        add_subdirectory( "Linux" )
++        include_directories( ${CMAKE_CURRENT_SOURCE_DIR}/Linux )
++    else()
+         add_subdirectory( ${CMAKE_SYSTEM_NAME} )
+         include_directories( ${CMAKE_CURRENT_SOURCE_DIR}/${CMAKE_SYSTEM_NAME} )
+     endif()
++    endif()
+ endif()
+ endif()
+ 
+--- origsrc/ksysguard-5.8.3/ksysguardd/Linux/CMakeLists.txt	2016-11-01 07:12:49.000000000 -0500
++++ src/ksysguard-5.8.3/ksysguardd/Linux/CMakeLists.txt	2016-11-28 17:10:53.957099000 -0600
+@@ -1,21 +1,25 @@
+ include_directories( ${CMAKE_CURRENT_SOURCE_DIR}/../CContLib ${CMAKE_CURRENT_BINARY_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR}/.. )
+ 
+ set(LIBKSYSGUARDD_FILES
+-            acpi.c
+-            apm.c
+             cpuinfo.c
+             diskstat.c
+-            diskstats.c
+-            i8k.c
+             loadavg.c
+             logfile.c
+             Memory.c
+-            netdev.c
+-            netstat.c
+             ProcessList.c
+             stat.c
+-            softraid.c
+             uptime.c)
++if (NOT CYGWIN)
++set(LIBKSYSGUARDD_FILES
++            ${LIBKSYSGUARDD_FILES}
++            acpi.c
++            apm.c
++            diskstats.c
++            i8k.c
++            netdev.c
++            netstat.c
++            softraid.c)
++endif()
+ 
+ if(SENSORS_FOUND)
+   set(LIBKSYSGUARDD_FILES ${LIBKSYSGUARDD_FILES} lmsensors.c)
+--- origsrc/ksysguard-5.8.3/ksysguardd/Linux/ProcessList.c	2016-11-01 07:12:49.000000000 -0500
++++ src/ksysguard-5.8.3/ksysguardd/Linux/ProcessList.c	2016-11-28 21:03:36.596180800 -0600
+@@ -29,8 +29,10 @@
+ #include <sys/resource.h>
+ #include <time.h>
+ #include <unistd.h>
++#ifndef __CYGWIN__
+ #include <sys/ptrace.h>
+ #include <asm/unistd.h>
++#endif
+ 
+ 
+ 
+@@ -50,7 +52,9 @@
+ extern int sys_ioprio_set(int, int, int);
+ extern int sys_ioprio_get(int, int);
+ 
++#ifndef __CYGWIN__
+ #define HAVE_IONICE
++#endif
+ 
+ /* Check if this system has ionice */
+ #if !defined(SYS_ioprio_get) || !defined(SYS_ioprio_set)
+@@ -268,18 +272,24 @@ static bool getProcess( int pid, Process
+   }
+   if (ps->ppid == 0) /* ksysguard uses -1 to indicate no parent, but linux uses 0 */
+       ps->ppid = -1;
+-  int major = ttyNo >> 8;
++  int major = ttyNo >> 16;
+   int minor = ttyNo & 0xff;
+   switch(major) {
+     case 136:
+       snprintf(ps->tty, sizeof(ps->tty)-1, "pts/%d", minor);
+       break;
++    case 117:
++      snprintf(ps->tty, sizeof(ps->tty)-1, "ttyS/%d", minor);
++      break;
+     case 4:
+       if(minor < 64)
+         snprintf(ps->tty, sizeof(ps->tty)-1, "tty/%d", minor);
+       else
+         snprintf(ps->tty, sizeof(ps->tty)-1, "ttyS/%d", minor-64);
+       break;
++    case 3:
++      snprintf(ps->tty, sizeof(ps->tty)-1, "cons/%d", minor);
++      break;
+     default:
+       ps->tty[0] = 0;
+   }
+--- origsrc/ksysguard-5.8.3/ksysguardd/Linux/diskstat.c	2016-11-01 07:12:49.000000000 -0500
++++ src/ksysguard-5.8.3/ksysguardd/Linux/diskstat.c	2016-11-28 21:32:25.375950700 -0600
+@@ -178,7 +178,7 @@ int updateDiskStat( void )
+          * Add special handling for smbfs and cifs as is done by
+          * coreutils as well.
+          */
+-        if ( (mnt_info->mnt_fsname[0] != '/') ||
++        if ( /* (mnt_info->mnt_fsname[0] != '/') || */
+              !strcmp( mnt_info->mnt_type, "smbfs" ) ||
+              !strcmp( mnt_info->mnt_type, "cifs" ) ||
+              !strcmp( mnt_info->mnt_type, "proc" ) ||
+--- origsrc/ksysguard-5.8.3/ksysguardd/Linux/stat.c	2016-11-01 07:12:49.000000000 -0500
++++ src/ksysguard-5.8.3/ksysguardd/Linux/stat.c	2016-11-29 00:02:28.127760600 -0600
+@@ -147,10 +147,10 @@ static int initStatDisk( char* tag, char
+  */
+ static void updateCPULoad( const char* line, CPULoadInfo* load ) {
+ 	unsigned long currUserTicks, currSysTicks, currNiceTicks;
+-	unsigned long currIdleTicks, currWaitTicks, totalTicks;
++	unsigned long currIdleTicks, currWaitTicks = 0, totalTicks;
+ 	
+ 	if(sscanf( line, "%*s %lu %lu %lu %lu %lu", &currUserTicks, &currNiceTicks,
+-		&currSysTicks, &currIdleTicks, &currWaitTicks ) != 5) {
++		&currSysTicks, &currIdleTicks, &currWaitTicks ) < 4) {
+         return;
+     }
+ 	
+--- origsrc/ksysguard-5.8.3/ksysguardd/modules.h	2016-11-01 07:12:49.000000000 -0500
++++ src/ksysguard-5.8.3/ksysguardd/modules.h	2016-11-28 16:56:53.513740300 -0600
+@@ -47,6 +47,17 @@
+ #include "uptime.h"
+ #endif /* OSTYPE_Linux */
+ 
++#ifdef OSTYPE_CYGWIN
++#include "cpuinfo.h"
++#include "diskstat.h"
++#include "loadavg.h"
++#include "logfile.h"
++#include "Memory.h"
++#include "ProcessList.h"
++#include "stat.h"
++#include "uptime.h"
++#endif /* OSTYPE_CYGWIN */
++
+ #if defined(OSTYPE_FreeBSD) || defined(OSTYPE_DragonFly)
+ #include <grp.h>
+ #include "acpi.h"
+@@ -144,6 +155,17 @@ struct SensorModul SensorModulList[] = {
+   { "Uptime", initUptime, exitUptime, NULLIVFUNC, NULLVVFUNC, 0, NULLTIME },
+ #endif /* OSTYPE_Linux */
+ 
++#ifdef OSTYPE_CYGWIN
++  { "CpuInfo", initCpuInfo, exitCpuInfo, updateCpuInfo, NULLVVFUNC, 0, NULLTIME },
++  { "DiskStat", initDiskStat, exitDiskStat, updateDiskStat, checkDiskStat, 0, NULLTIME },
++  { "LoadAvg", initLoadAvg, exitLoadAvg, updateLoadAvg, NULLVVFUNC, 0, NULLTIME },
++  { "LogFile", initLogFile, exitLogFile, NULLIVFUNC, NULLVVFUNC, 0, NULLTIME },
++  { "Memory", initMemory, exitMemory, updateMemory, NULLVVFUNC, 0, NULLTIME },
++  { "ProcessList", initProcessList, exitProcessList, NULLIVFUNC, NULLVVFUNC, 0, NULLTIME },
++  { "Stat", initStat, exitStat, updateStat, NULLVVFUNC, 0, NULLTIME },
++  { "Uptime", initUptime, exitUptime, NULLIVFUNC, NULLVVFUNC, 0, NULLTIME },
++#endif /* OSTYPE_CYGWIN */
++
+ #if defined OSTYPE_FreeBSD || defined OSTYPE_DragonFly
+   { "Acpi", initACPI, exitACPI, updateACPI, NULLVVFUNC, 0, NULLTIME },
+   #ifdef __i386__

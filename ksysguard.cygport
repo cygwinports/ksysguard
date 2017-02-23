@@ -1,0 +1,33 @@
+inherit kf5
+
+NAME="ksysguard"
+VERSION=5.8.5
+RELEASE=1
+CATEGORY="KDE"
+SUMMARY="KDE system monitor"
+DESCRIPTION="KSysGuard is a program to monitor various elements of your system,
+or any other remote system with the KSysGuard daemon (ksysgardd) installed."
+
+PATCH_URI="5.8.3-cygwin.patch"
+
+PKG_NAMES="${NAME} ${NAME}d"
+ksysguard_REQUIRES="ksysguardd"
+ksysguard_CONTENTS="
+	etc/postinstall/ksysguard.sh
+	etc/xdg/ksysguard.knsrc
+	usr/bin/cygkdeinit5_ksysguard.dll
+	usr/bin/ksysguard.exe
+	usr/share/applications/org.kde.ksysguard.desktop
+	usr/share/doc/HTML/*/ksysguard/
+	usr/share/icons/hicolor/16x16/apps/*
+	usr/share/knotifications5/ksysguard.notifyrc
+	usr/share/ksysguard/
+	usr/share/kxmlgui5/ksysguard/
+	usr/share/locale/*/LC_MESSAGES/ksysguard.mo
+"
+ksysguardd_SUMMARY="${SUMMARY} daemon"
+ksysguardd_CONTENTS="
+	etc/ksysguarddrc
+	usr/bin/ksysguardd.exe
+	usr/share/doc/ksysguard/
+"
